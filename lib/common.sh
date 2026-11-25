@@ -221,7 +221,19 @@ sweep_timeout() {
   local secs="$1"; shift
   "$@" &
   local pid=$!
-  ( sleep "$secs"; kill -TERM "$pid" 2>/dev/null; sleep 3; kill -KILL "$pid" 2>/dev/null ) >/dev/null 2>&1 &
+  # The watcher polls instead of sleeping for the whole timeout, so it goes
+  # away on its own as soon as the command finishes and leaves nothing behind.
+  (
+    i=0
+    while [ "$i" -lt "$secs" ]; do
+      sleep 1
+      kill -0 "$pid" 2>/dev/null || exit 0
+      i=$((i + 1))
+    done
+    kill -TERM "$pid" 2>/dev/null
+    sleep 3
+    kill -KILL "$pid" 2>/dev/null
+  ) >/dev/null 2>&1 &
   local watcher=$!
   local rc=0
   wait "$pid" 2>/dev/null || rc=$?
@@ -333,6 +345,7 @@ sweep_weekly_due() {
 sweep_run_init() {
   SWEEP_DRY_RUN="${SWEEP_DRY_RUN:-0}"
   SWEEP_START_EPOCH=$(sweep_now)
+  SWEEP_START_REAL=$(date +%s)
   SWEEP_DATE=$(date -r "$SWEEP_START_EPOCH" +%Y-%m-%d)
   mkdir -p "$SWEEP_LOG_DIR"
   SWEEP_RUN_LOG="$SWEEP_LOG_DIR/$SWEEP_DATE.log"

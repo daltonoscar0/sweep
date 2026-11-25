@@ -312,7 +312,7 @@ EOF
       xargs -0 du -sk 2>/dev/null | awk '{s+=$1} END {print s+0}')
     n=$(find "$HOME/Downloads" -mindepth 1 -maxdepth 1 -mtime +90 2>/dev/null | wc -l | tr -d ' ')
     if [ "${n:-0}" -gt 0 ]; then
-      sweep_record_fyi downloads "$n items in \`~/Downloads\` are older than 90 days, $(sweep_human "${total:-0}") in total (sweep never touches Downloads)"
+      sweep_record_fyi downloads "$n item$([ "$n" -eq 1 ] || printf s) in \`~/Downloads\` older than 90 days, $(sweep_human "${total:-0}") in total. sweep never touches Downloads."
     fi
   fi
   return 0
