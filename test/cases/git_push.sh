@@ -58,7 +58,7 @@ assert_eq       'their remote is untouched'    "$(remote_head "$O" main)" "$(git
 assert_contains 'and it is explained'          "$(cat "$SWEEP_FYI")" "belongs to nyusemantics rather than you"
 
 assert_not_contains 'a non-GitHub remote is not pushed' "$got" "nogithub"
-assert_contains 'with its own line'            "$(cat "$SWEEP_FYI")" "**nogithub** has 1 commit(s) not on its remote"
+assert_contains 'with its own line'            "$(cat "$SWEEP_FYI")" "**nogithub**: 1 commit(s) to push, but the remote belongs to nobody sweep recognises"
 
 assert_not_contains 'a repo that is behind is not pushed' "$got" "bothways"
 assert_contains 'it is reported as behind'     "$(awk -F'\t' '$1=="behind" {print $2}' "$SWEEP_GIT")" "bothways"
@@ -77,7 +77,7 @@ export AUTO_PUSH=0
 t_commit "$A" "three.txt" 3
 sweep_git_check
 assert_eq       'nothing was pushed'           "$(wc -l < "$SWEEP_PUSH" | tr -d ' ')" "0"
-assert_contains 'but it is still reported'     "$(cat "$SWEEP_FYI")" "**mine** has 1 commit(s) to push, but AUTO_PUSH=0"
+assert_contains 'but it is still reported'     "$(cat "$SWEEP_FYI")" "**mine**: 1 commit(s) to push, but AUTO_PUSH=0."
 
 echo "offline: nothing is pushed and the report says so"
 unset SWEEP_ENV_SNAPSHOT
@@ -86,6 +86,6 @@ export AUTO_PUSH=1 SWEEP_FAKE_NETWORK=0
 sweep_git_check
 assert_eq       'no pushes'                    "$(wc -l < "$SWEEP_PUSH" | tr -d ' ')" "0"
 assert_contains 'the run is marked offline'    "$(awk -F'\t' '$1=="offline" {print $3}' "$SWEEP_GIT")" "github.com was unreachable"
-assert_contains 'and the repo is listed'       "$(cat "$SWEEP_FYI")" "**mine** has 1 commit(s) to push; sweep was offline"
+assert_contains 'and the repo is listed'       "$(cat "$SWEEP_FYI")" "**mine**: 1 commit(s) to push; sweep was offline."
 
 t_end

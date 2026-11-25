@@ -371,15 +371,25 @@ sweep_maybe_push() {
   # what puts the branch on GitHub in the first place, so it always goes.
   if [ -n "$upstream" ] && [ "$ahead" -eq 0 ]; then return 0; fi
 
+  # What there is to send, in words. A branch with no upstream is worth
+  # mentioning even when it is not ahead: the branch itself is not on GitHub.
+  local what
+  if [ -z "$upstream" ]; then
+    what="branch \`$branch\` is not on its remote"
+    [ "$ahead" -gt 0 ] && what="$what, with $ahead commit(s) of its own"
+  else
+    what="$ahead commit(s) to push"
+  fi
+
   if [ "${AUTO_PUSH:-1}" != 1 ]; then
-    sweep_record_fyi push_off "**$name** has $ahead commit(s) to push, but AUTO_PUSH=0."
+    sweep_record_fyi push_off "**$name**: $what, but AUTO_PUSH=0."
     return 0
   fi
 
   owner=$(sweep_repo_owner "$r" "$url") || owner=""
   if ! sweep_owner_allowed "$owner"; then
     sweep_record_fyi other_owner \
-      "**$name** has $ahead commit(s) not on its remote, but the remote belongs to ${owner:-nobody sweep recognises} rather than you, so sweep will not push it."
+      "**$name**: $what, but the remote belongs to ${owner:-nobody sweep recognises} rather than you, so sweep will not push it."
     return 0
   fi
 
@@ -389,7 +399,7 @@ sweep_maybe_push() {
   fi
 
   if [ "$SWEEP_NET" != 1 ]; then
-    sweep_record_fyi offline_push "**$name** has $ahead commit(s) to push; sweep was offline."
+    sweep_record_fyi offline_push "**$name**: $what; sweep was offline."
     return 0
   fi
   if [ "$SWEEP_AUTH_FAILED" = 1 ]; then
