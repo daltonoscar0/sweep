@@ -7,6 +7,7 @@
 # Displaying a literal tilde needs a variable: in bash 3.2 "${p/#$HOME/\~}"
 # expands to a backslash followed by the tilde.
 TILDE='~'
+SWEEP_TAB=$(printf '\t')
 
 SWEEP_CONFIG_KEYS="CODE_DIR LOW_SPACE_GB KEEP_HF HF_MAX_IDLE_DAYS \
 DERIVED_DATA_MAX_AGE_DAYS DEVICE_SUPPORT_KEEP LOG_MAX_AGE_DAYS CACHE_MIN_MB \
@@ -375,6 +376,12 @@ sweep_record_push() {   # status, repo, branch, commits, detail
 
 sweep_record_fyi() {    # kind, text
   printf '%s\t%s\n' "$1" "$2" >> "$SWEEP_FYI"
+}
+
+sweep_record_fyi_once() {
+  if ! grep -Fqx "$(printf '%s\t%s' "$1" "$2")" "$SWEEP_FYI" 2>/dev/null; then
+    sweep_record_fyi "$1" "$2"
+  fi
 }
 
 sweep_cleaned_kb() {

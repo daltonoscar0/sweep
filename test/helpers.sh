@@ -99,23 +99,26 @@ t_mkfile() {  # path mb [age_days]
   return 0
 }
 
-# Set a path's mtime (and atime) N days before now.
-t_age() {  # path days
-  local when
-  when=$(date -r $(( $(date +%s) - $2 * 86400 )) +%Y%m%d%H%M.%S)
-  touch -t "$when" "$1"
-}
+# Ages are measured from SWEEP_NOW, the same clock sweep uses, so that
+# "21 days idle" means exactly that and no test is a second away from flaky.
+t_stamp() { date -r $(( SWEEP_NOW - $1 )) +%Y%m%d%H%M.%S; }
 
-# Set a path's mtime N hours before now.
-t_age_hours() {  # path hours
-  local when
-  when=$(date -r $(( $(date +%s) - $2 * 3600 )) +%Y%m%d%H%M.%S)
-  touch -t "$when" "$1"
+t_age()       { touch -t "$(t_stamp $(( $2 * 86400 )))" "$1"; }  # path days
+t_age_hours() { touch -t "$(t_stamp $(( $2 * 3600 )))" "$1"; }   # path hours
+
+# Age a whole tree, deepest entries included.
+t_age_tree() { # path days
+  find "$1" -print0 | xargs -0 -n 50 touch -t "$(t_stamp $(( $2 * 86400 )))"
 }
 
 # A repo with one commit, plus a bare "remote" it is up to date with.
 t_mkrepo() {  # name  -> echoes the repo path
-  local name="$1" repo="$CODE_DIR/$name" remote="$T_TMP/remotes/$name.git"
+  # bash expands every word of "local" before assigning any of them, so these
+  # cannot be one statement.
+  local name repo remote
+  name="$1"
+  repo="$CODE_DIR/$name"
+  remote="$T_TMP/remotes/$name.git"
   mkdir -p "$repo" "$(dirname "$remote")"
   git init -q --bare "$remote"
   git init -q "$repo"
