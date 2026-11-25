@@ -1,0 +1,298 @@
+#!/bin/bash
+# sweep -- once-a-day Mac cleanup and git backup check.
+#
+#   sweep run [--dry-run] [--now] [--force]   one pass (what launchd calls)
+#   sweep install                             write and load the LaunchAgent
+#   sweep uninstall                           unload and remove it
+#   sweep status                              installed?, last run, free space
+#   sweep report                              print the latest report
+#
+# Nothing here ever asks for a password, a token or a key, and nothing writes
+# a credential anywhere.
+
+set -u
+
+# Resolve this script through any symlinks (~/.local/bin/sweep -> repo).
+sweep_self() {
+  local src="${BASH_SOURCE[0]}" dir
+  while [ -L "$src" ]; do
+    dir=$(cd -P "$(dirname "$src")" && pwd)
+    src=$(readlink "$src")
+    case "$src" in
+      /*) ;;
+      *) src="$dir/$src" ;;
+    esac
+  done
+  printf '%s\n' "$(cd -P "$(dirname "$src")" && pwd)/$(basename "$src")"
+}
+
+SWEEP_SELF=$(sweep_self)
+SWEEP_HOME=$(dirname "$(dirname "$SWEEP_SELF")")
+
+# shellcheck source=lib/common.sh
+. "$SWEEP_HOME/lib/common.sh"
+# shellcheck source=lib/clean.sh
+. "$SWEEP_HOME/lib/clean.sh"
+# shellcheck source=lib/git.sh
+. "$SWEEP_HOME/lib/git.sh"
+# shellcheck source=lib/report.sh
+. "$SWEEP_HOME/lib/report.sh"
+
+sweep_die() { printf 'sweep: %s\n' "$*" >&2; exit 1; }
+
+sweep_usage() {
+  sed -n '2,8p' "$SWEEP_SELF" | sed 's/^# \{0,1\}//'
+}
+
+# ---------------------------------------------------------------------------
+
+cmd_run() {
+  local dry=0 now=0 force=0 arg
+  for arg in "$@"; do
+    case "$arg" in
+      --dry-run|-n) dry=1 ;;
+      --now) now=1 ;;
+      --force|-f) force=1 ;;
+      *) sweep_die "run: unknown option $arg" ;;
+    esac
+  done
+
+  if [ "$(id -u)" -eq 0 ]; then
+    sweep_die "run this as yourself, not with sudo."
+  fi
+
+  SWEEP_DRY_RUN="$dry"
+  sweep_paths
+  sweep_load_config
+
+  # Cheap guard first, so repeated wake/login triggers cost nothing.
+  if [ "$force" -eq 0 ] && sweep_day_done; then
+    exit 0
+  fi
+
+  if ! sweep_lock_acquire; then
+    printf 'sweep: another run is in progress\n' >&2
+    exit 0
+  fi
+  trap 'sweep_run_cleanup' EXIT
+  trap 'sweep_run_cleanup; exit 130' INT TERM
+
+  if [ "$now" -eq 0 ] && [ "${START_DELAY:-0}" -gt 0 ]; then
+    sleep "$START_DELAY"
+  fi
+  if [ "$force" -eq 0 ] && sweep_day_done; then
+    exit 0
+  fi
+
+  sweep_run_init || sweep_die "could not create a working directory"
+  sweep_log "=== sweep run start (dry_run=$SWEEP_DRY_RUN) ==="
+
+  local free_before free_after low_batt=0
+  free_before=$(sweep_free_kb)
+
+  if sweep_on_low_battery; then
+    low_batt=1
+    sweep_note "On battery below 30%, so only the light tier ran. The weekly and low-space tiers will run on the next mains-powered sweep."
+  fi
+
+  sweep_tier light
+  sweep_clean_app_caches
+  sweep_clean_logs
+  sweep_clean_project_caches
+  sweep_clean_derived_data
+
+  if [ "$low_batt" -eq 0 ] && sweep_weekly_due; then
+    sweep_tier weekly
+    sweep_clean_dev_caches
+    sweep_clean_device_support
+    [ "$SWEEP_DRY_RUN" = 1 ] || sweep_state_set last_weekly_epoch "$(sweep_now)"
+  fi
+
+  if [ "$low_batt" -eq 0 ] && sweep_free_gb_lt "$LOW_SPACE_GB"; then
+    sweep_tier low-space
+    sweep_clean_huggingface
+    sweep_report_big_things
+  fi
+
+  sweep_fyi_docker
+  sweep_git_check
+
+  free_after=$(sweep_free_kb)
+  sweep_log "=== sweep run end ==="
+
+  sweep_write_report "$free_before" "$free_after"
+  sweep_notify
+
+  if [ "$SWEEP_DRY_RUN" != 1 ]; then
+    sweep_mark_day_done
+    sweep_state_set last_free_before_kb "$free_before"
+    sweep_state_set last_free_after_kb "$free_after"
+    sweep_state_set last_freed_kb "$(sweep_cleaned_kb)"
+  fi
+  sweep_prune_reports
+  exit 0
+}
+
+# ---------------------------------------------------------------------------
+
+cmd_report() {
+  sweep_paths
+  local latest="$SWEEP_LOG_DIR/latest.md"
+  if [ -f "$latest" ]; then
+    cat "$latest"
+  else
+    printf 'No report yet. Run: sweep run --now\n'
+  fi
+}
+
+cmd_status() {
+  sweep_paths
+  sweep_load_config
+  local v
+
+  printf 'sweep %s\n' "$(sweep_disp "$SWEEP_HOME")"
+  if [ -f "$SWEEP_PLIST" ]; then
+    printf '  LaunchAgent: installed (%s)\n' "$(sweep_disp "$SWEEP_PLIST")"
+    if launchctl print "gui/$(id -u)/$SWEEP_LABEL" >/dev/null 2>&1; then
+      printf '  loaded:      yes, next run 04:30 (or the first wake after it)\n'
+    else
+      printf '  loaded:      no -- run: sweep install\n'
+    fi
+  else
+    printf '  LaunchAgent: not installed -- run: sweep install\n'
+  fi
+
+  if v=$(sweep_state_get last_run_epoch); then
+    printf '  last run:    %s (sweep day %s)\n' "$(sweep_stamp "$v")" \
+      "$(sweep_state_get last_run_day || echo '?')"
+  else
+    printf '  last run:    never\n'
+  fi
+  if v=$(sweep_state_get last_weekly_epoch); then
+    printf '  last weekly: %s\n' "$(sweep_stamp "$v")"
+  else
+    printf '  last weekly: never\n'
+  fi
+  if v=$(sweep_state_get last_free_before_kb); then
+    printf '  free space:  %s before, %s after, removed %s\n' \
+      "$(sweep_human "$v")" \
+      "$(sweep_human "$(sweep_state_get last_free_after_kb || echo 0)")" \
+      "$(sweep_human "$(sweep_state_get last_freed_kb || echo 0)")"
+  fi
+  printf '  free now:    %s\n' "$(sweep_human "$(sweep_free_kb)")"
+  printf '  config:      %s%s\n' "$(sweep_disp "$SWEEP_CONFIG")" \
+    "$([ -f "$SWEEP_CONFIG" ] || printf ' (missing, defaults in use)')"
+  printf '  auto-push:   %s (owners: %s)\n' \
+    "$([ "${AUTO_PUSH:-0}" = 1 ] && printf on || printf off)" "${PUSH_OWNERS:-}"
+  printf '  reports:     %s\n' "$(sweep_disp "$SWEEP_LOG_DIR")"
+}
+
+# ---------------------------------------------------------------------------
+
+cmd_install() {
+  sweep_paths
+  sweep_load_config
+  [ "$(id -u)" -eq 0 ] && sweep_die "install as yourself, not with sudo."
+
+  mkdir -p "$HOME/.local/bin" "$HOME/Library/LaunchAgents" "$SWEEP_LOG_DIR"
+
+  # 1. the command on PATH
+  if [ -e "$SWEEP_BIN_LINK" ] && [ ! -L "$SWEEP_BIN_LINK" ]; then
+    printf 'Leaving %s alone: it exists and is not a symlink.\n' "$(sweep_disp "$SWEEP_BIN_LINK")"
+  else
+    ln -sfn "$SWEEP_SELF" "$SWEEP_BIN_LINK"
+    printf 'Linked %s -> %s\n' "$(sweep_disp "$SWEEP_BIN_LINK")" "$(sweep_disp "$SWEEP_SELF")"
+  fi
+
+  # 2. config
+  if sweep_write_default_config; then
+    printf 'Wrote %s\n' "$(sweep_disp "$SWEEP_CONFIG")"
+  else
+    printf 'Kept your existing %s\n' "$(sweep_disp "$SWEEP_CONFIG")"
+  fi
+
+  # 3. the LaunchAgent
+  local tmpl="$SWEEP_HOME/launchd/$SWEEP_LABEL.plist.template"
+  [ -f "$tmpl" ] || sweep_die "missing $tmpl"
+  sed -e "s|@LABEL@|$SWEEP_LABEL|g" \
+      -e "s|@SWEEP@|$SWEEP_SELF|g" \
+      -e "s|@LOGDIR@|$SWEEP_LOG_DIR|g" \
+      -e "s|@HOME@|$HOME|g" \
+      "$tmpl" > "$SWEEP_PLIST"
+  printf 'Wrote %s\n' "$(sweep_disp "$SWEEP_PLIST")"
+
+  launchctl bootout "gui/$(id -u)/$SWEEP_LABEL" >/dev/null 2>&1 || :
+  if launchctl bootstrap "gui/$(id -u)" "$SWEEP_PLIST" 2>/dev/null; then
+    printf 'Loaded with launchctl bootstrap.\n'
+  elif launchctl load -w "$SWEEP_PLIST" 2>/dev/null; then
+    printf 'Loaded with launchctl load -w.\n'
+  else
+    printf 'Could not load it. Try:\n  launchctl bootstrap gui/%s %s\n' \
+      "$(id -u)" "$(sweep_disp "$SWEEP_PLIST")"
+  fi
+  launchctl print "gui/$(id -u)/$SWEEP_LABEL" 2>/dev/null | head -12 | sed 's/^/  /'
+
+  printf '\n'
+  case ":${PATH}:" in
+    *":$HOME/.local/bin:"*) ;;
+    *)
+      printf 'Add ~/.local/bin to your PATH. Put this line in ~/.zshrc yourself:\n'
+      printf '\n    export PATH="$HOME/.local/bin:$PATH"\n\n'
+      ;;
+  esac
+
+  cat <<NOTES
+Two things sweep deliberately will not do for you:
+
+  Trash. A launchd job cannot see ~/.Trash without Full Disk Access, so sweep
+  never empties it. Turn on the built-in equivalent instead:
+      Finder > Settings > Advanced > "Remove items from the Trash after 30 days"
+
+  SSH keys. So that pushes work from a background job, make sure ~/.ssh/config
+  contains:
+      Host github.com
+        AddKeysToAgent yes
+        UseKeychain yes
+  (you have already run ssh-add --apple-use-keychain). HTTPS remotes use the
+  macOS keychain helper and need nothing extra.
+
+Next: sweep run --now        then: sweep report
+NOTES
+}
+
+cmd_uninstall() {
+  sweep_paths
+  if [ -f "$SWEEP_PLIST" ]; then
+    launchctl bootout "gui/$(id -u)/$SWEEP_LABEL" >/dev/null 2>&1 ||
+      launchctl unload -w "$SWEEP_PLIST" >/dev/null 2>&1 || :
+    rm -f "$SWEEP_PLIST"
+    printf 'Unloaded and removed %s\n' "$(sweep_disp "$SWEEP_PLIST")"
+  else
+    printf 'No LaunchAgent at %s\n' "$(sweep_disp "$SWEEP_PLIST")"
+  fi
+  if [ -L "$SWEEP_BIN_LINK" ]; then
+    rm -f "$SWEEP_BIN_LINK"
+    printf 'Removed %s\n' "$(sweep_disp "$SWEEP_BIN_LINK")"
+  fi
+  rm -rf "$SWEEP_LOCK"
+  printf 'Kept your config (%s) and reports (%s).\n' \
+    "$(sweep_disp "$SWEEP_CONFIG_DIR/config")" "$(sweep_disp "$SWEEP_LOG_DIR")"
+}
+
+# ---------------------------------------------------------------------------
+
+main() {
+  local cmd="${1:-}"
+  [ $# -gt 0 ] && shift
+  case "$cmd" in
+    run)       cmd_run "$@" ;;
+    install)   cmd_install "$@" ;;
+    uninstall) cmd_uninstall "$@" ;;
+    status)    cmd_status "$@" ;;
+    report)    cmd_report "$@" ;;
+    ""|-h|--help|help) sweep_usage ;;
+    *) printf 'sweep: unknown command %s\n\n' "$cmd" >&2; sweep_usage >&2; exit 1 ;;
+  esac
+}
+
+main "$@"

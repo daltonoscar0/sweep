@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>@LABEL@</string>
+
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>@SWEEP@</string>
+		<string>run</string>
+	</array>
+
+	<!-- 04:30 every day. If the Mac is asleep or off, launchd runs the missed
+	     job at the next wake; RunAtLoad covers the first login after a
+	     shutdown. sweep's own once-per-day guard makes the extras no-ops. -->
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Hour</key>
+		<integer>4</integer>
+		<key>Minute</key>
+		<integer>30</integer>
+	</dict>
+	<key>RunAtLoad</key>
+	<true/>
+
+	<!-- Stay out of the way of anything Oscar is doing. -->
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>LowPriorityIO</key>
+	<true/>
+	<key>Nice</key>
+	<integer>10</integer>
+
+	<key>StandardOutPath</key>
+	<string>@LOGDIR@/launchd.out.log</string>
+	<key>StandardErrorPath</key>
+	<string>@LOGDIR@/launchd.err.log</string>
+
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<key>HOME</key>
+		<string>@HOME@</string>
+	</dict>
+
+	<key>WorkingDirectory</key>
+	<string>@HOME@</string>
+</dict>
+</plist>
