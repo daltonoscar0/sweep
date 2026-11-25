@@ -346,6 +346,7 @@ sweep_run_init() {
   : > "$SWEEP_CLEANED"; : > "$SWEEP_GIT"; : > "$SWEEP_PUSH"
   : > "$SWEEP_FYI"; : > "$SWEEP_NOTES"
   SWEEP_TIERS=""
+  SWEEP_REPO_COUNT=0
 }
 
 sweep_run_cleanup() {

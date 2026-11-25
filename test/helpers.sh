@@ -143,4 +143,19 @@ t_commit() {  # repo file content [message]
   git -C "$repo" commit -qm "${4:-change $file}"
 }
 
+# Put a commit on a repo's remote without touching the repo, so the repo ends
+# up behind its upstream.
+t_remote_commit() {  # repo file content
+  local repo url tmp
+  repo="$1"
+  url=$(git -C "$repo" remote get-url origin)
+  tmp="$T_TMP/clone.$RANDOM$RANDOM"
+  git clone -q "$url" "$tmp"
+  printf '%s\n' "$3" > "$tmp/$2"
+  git -C "$tmp" add -A
+  git -C "$tmp" commit -qm "a commit made elsewhere"
+  git -C "$tmp" push -q origin HEAD
+  rm -rf "$tmp"
+}
+
 t_report() { cat "$HOME/Library/Logs/sweep/latest.md" 2>/dev/null; }
