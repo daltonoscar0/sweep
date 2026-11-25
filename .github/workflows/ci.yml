@@ -1,0 +1,37 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    # sweep is macOS-only: BSD stat/find, launchd, APFS. It also has to keep
+    # working with the bash 3.2 that ships with macOS, which is what /bin/bash
+    # is on the runner.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: bash version in use
+        run: /bin/bash --version | head -1
+
+      - name: syntax check with the system bash
+        run: |
+          for f in bin/sweep lib/*.sh test/*.sh test/cases/*.sh; do
+            /bin/bash -n "$f" || exit 1
+          done
+
+      - name: shellcheck (errors fail the build)
+        run: |
+          brew list shellcheck >/dev/null 2>&1 || brew install shellcheck
+          shellcheck -s bash --severity=error -e SC1090,SC1091,SC2034 bin/sweep lib/*.sh
+
+      - name: shellcheck (style, advisory only)
+        continue-on-error: true
+        run: shellcheck -s bash -e SC1090,SC1091,SC2034 bin/sweep lib/*.sh
+
+      - name: tests
+        run: /bin/bash test/run.sh

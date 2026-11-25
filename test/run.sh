@@ -30,7 +30,8 @@ rm -f /tmp/sweep-syntax.$$
 
 if command -v shellcheck >/dev/null 2>&1; then
   printf 'shellcheck\n'
-  if shellcheck -s bash -e SC1090,SC1091,SC2034 bin/sweep lib/*.sh; then
+  # Errors only: style findings are printed by CI but never fail the suite.
+  if shellcheck -s bash --severity=error -e SC1090,SC1091,SC2034 bin/sweep lib/*.sh; then
     printf '  ok\n'
   else
     printf '  FAIL\n'

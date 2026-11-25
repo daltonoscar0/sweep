@@ -153,7 +153,9 @@ cmd_status() {
   printf 'sweep %s\n' "$(sweep_disp "$SWEEP_HOME")"
   if [ -f "$SWEEP_PLIST" ]; then
     printf '  LaunchAgent: installed (%s)\n' "$(sweep_disp "$SWEEP_PLIST")"
-    if launchctl print "gui/$(id -u)/$SWEEP_LABEL" >/dev/null 2>&1; then
+    if [ "${SWEEP_TESTING:-0}" = 1 ]; then
+      printf '  loaded:      not checked (SWEEP_TESTING)\n'
+    elif launchctl print "gui/$(id -u)/$SWEEP_LABEL" >/dev/null 2>&1; then
       printf '  loaded:      yes, next run 04:30 (or the first wake after it)\n'
     else
       printf '  loaded:      no -- run: sweep install\n'
@@ -221,16 +223,24 @@ cmd_install() {
       "$tmpl" > "$SWEEP_PLIST"
   printf 'Wrote %s\n' "$(sweep_disp "$SWEEP_PLIST")"
 
-  launchctl bootout "gui/$(id -u)/$SWEEP_LABEL" >/dev/null 2>&1 || :
-  if launchctl bootstrap "gui/$(id -u)" "$SWEEP_PLIST" 2>/dev/null; then
-    printf 'Loaded with launchctl bootstrap.\n'
-  elif launchctl load -w "$SWEEP_PLIST" 2>/dev/null; then
-    printf 'Loaded with launchctl load -w.\n'
-  else
-    printf 'Could not load it. Try:\n  launchctl bootstrap gui/%s %s\n' \
-      "$(id -u)" "$(sweep_disp "$SWEEP_PLIST")"
+  if ! plutil -lint "$SWEEP_PLIST" >/dev/null 2>&1; then
+    sweep_die "the plist sweep just wrote is not valid; nothing was loaded"
   fi
-  launchctl print "gui/$(id -u)/$SWEEP_LABEL" 2>/dev/null | head -12 | sed 's/^/  /'
+
+  if [ "${SWEEP_TESTING:-0}" = 1 ]; then
+    printf 'Not loading it: SWEEP_TESTING is set.\n'
+  else
+    launchctl bootout "gui/$(id -u)/$SWEEP_LABEL" >/dev/null 2>&1 || :
+    if launchctl bootstrap "gui/$(id -u)" "$SWEEP_PLIST" 2>/dev/null; then
+      printf 'Loaded with launchctl bootstrap.\n'
+    elif launchctl load -w "$SWEEP_PLIST" 2>/dev/null; then
+      printf 'Loaded with launchctl load -w.\n'
+    else
+      printf 'Could not load it. Try:\n  launchctl bootstrap gui/%s %s\n' \
+        "$(id -u)" "$(sweep_disp "$SWEEP_PLIST")"
+    fi
+    launchctl print "gui/$(id -u)/$SWEEP_LABEL" 2>/dev/null | head -12 | sed 's/^/  /'
+  fi
 
   printf '\n'
   case ":${PATH}:" in
@@ -263,8 +273,10 @@ NOTES
 cmd_uninstall() {
   sweep_paths
   if [ -f "$SWEEP_PLIST" ]; then
-    launchctl bootout "gui/$(id -u)/$SWEEP_LABEL" >/dev/null 2>&1 ||
-      launchctl unload -w "$SWEEP_PLIST" >/dev/null 2>&1 || :
+    if [ "${SWEEP_TESTING:-0}" != 1 ]; then
+      launchctl bootout "gui/$(id -u)/$SWEEP_LABEL" >/dev/null 2>&1 ||
+        launchctl unload -w "$SWEEP_PLIST" >/dev/null 2>&1 || :
+    fi
     rm -f "$SWEEP_PLIST"
     printf 'Unloaded and removed %s\n' "$(sweep_disp "$SWEEP_PLIST")"
   else
