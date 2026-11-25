@@ -22,6 +22,47 @@ assert_eq 'untouched keys keep defaults' "$DEVICE_SUPPORT_KEEP" "2"
 assert_false 'an existing config is never overwritten' sweep_write_default_config
 assert_eq 'it really is untouched'    "$(sed -n 1p "$HOME/.config/sweep/config")" "LOW_SPACE_GB=5"
 
+echo "a config that extends a list rather than replacing it"
+# Oscar's actual addition: append to CACHE_SKIP instead of restating it. The
+# config is sourced as bash *after* the defaults are assigned, which is the
+# whole reason "$CACHE_SKIP ..." works -- and is easy to break by loading the
+# file before the defaults, or by parsing it as KEY=value instead of sourcing
+# it. Either change would silently drop the defaults and start deleting
+# Safari's cache.
+cat > "$HOME/.config/sweep/config" <<'EOF'
+CACHE_SKIP="$CACHE_SKIP SiriTTS com.apple.textunderstandingd com.spotify.client"
+EOF
+sweep_load_config
+for name in com.apple.Safari com.apple.akd com.apple.accountsd; do
+  assert_contains "the default $name survives" "$CACHE_SKIP" "$name"
+done
+for name in SiriTTS com.apple.textunderstandingd com.spotify.client; do
+  assert_contains "the added $name is there" "$CACHE_SKIP" "$name"
+done
+assert_eq 'six entries, not three and not one' "$(set -- $CACHE_SKIP; echo $#)" "6"
+assert_not_contains 'and the variable is expanded, not kept literal' \
+  "$CACHE_SKIP" '$CACHE_SKIP'
+
+# The same trick on every other space-separated list, since nothing about
+# CACHE_SKIP makes it special.
+cat > "$HOME/.config/sweep/config" <<'EOF'
+KEEP_HF="$KEEP_HF gpt2"
+PUSH_OWNERS="$PUSH_OWNERS someone-else"
+EOF
+sweep_load_config
+assert_eq 'KEEP_HF extends'     "$KEEP_HF" "distilroberta-base gpt2"
+assert_eq 'PUSH_OWNERS extends' "$PUSH_OWNERS" "daltonoscar0 someone-else"
+
+# And appending twice to the same key is the file's own doing, not sweep's:
+# reloading must not keep growing the list.
+cat > "$HOME/.config/sweep/config" <<'EOF'
+CACHE_SKIP="$CACHE_SKIP SiriTTS"
+EOF
+sweep_load_config
+first="$CACHE_SKIP"
+sweep_load_config
+assert_eq 'reloading does not append again' "$CACHE_SKIP" "$first"
+
 rm -f "$HOME/.config/sweep/config"
 assert_true 'a missing config is created' sweep_write_default_config
 assert_contains 'with the documented defaults' "$(cat "$HOME/.config/sweep/config")" "DEVICE_SUPPORT_KEEP=2"

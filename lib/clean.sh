@@ -334,3 +334,105 @@ sweep_fyi_docker() {
   fi
   return 0
 }
+
+# ---------------------------------------------------------------------------
+# Free space that went away without sweep's help.
+#
+# On 2026-11-25 the disk lost about 15 GB in two hours while sweep had removed
+# 38 MB. macOS had staged an OS update, which lives outside the home folder and
+# so is invisible to every tier above. Looking at the tiers' own numbers, the
+# only available conclusion was "sweep is not working", which was wrong.
+#
+# Report only. A staged update is wanted, and a local snapshot is the only copy
+# of something in the hour before Time Machine runs; deleting either to free
+# space is a decision with consequences sweep is not placed to weigh.
+
+# `softwareupdate --list` output on stdin -> one update name per line.
+#
+# Separate from the command so it can be tested on captured output rather than
+# on whatever Apple is offering today. Each update is a `* Label:` line
+# followed by a `Title:` line; the title is the readable one, and the label is
+# the fallback for a block that has no title.
+sweep_parse_updates() {
+  awk '
+    /^[ \t]*\*[ \t]*Label:/ {
+      if (pending != "") print pending
+      pending = $0
+      sub(/^[ \t]*\*[ \t]*Label:[ \t]*/, "", pending)
+      next
+    }
+    /^[ \t]*Title:/ {
+      title = $0
+      sub(/^[ \t]*Title:[ \t]*/, "", title)
+      sub(/,[ \t]*Version:.*$/, "", title)
+      if (title != "") { print title; pending = "" }
+      next
+    }
+    END { if (pending != "") print pending }
+  ' | sed 's/[[:space:]]*$//' | grep -v '^$' | LC_ALL=C sort -u
+}
+
+# Pending OS updates. `softwareupdate --list` reaches Apple and is reliably
+# slow, sometimes minutes, so it gets a hard limit; its failure is not
+# interesting enough to report.
+sweep_pending_updates() {
+  [ "${SWEEP_TESTING:-0}" = 1 ] && return 0
+  sweep_have softwareupdate || return 0
+  sweep_timeout 45 softwareupdate --list 2>&1 | sweep_parse_updates
+}
+
+# `tmutil listlocalsnapshots /` output on stdin -> one snapshot date per line.
+sweep_parse_snapshots() {
+  sed -n 's/^com\.apple\.TimeMachine\.\(.*\)\.local$/\1/p' | LC_ALL=C sort
+}
+
+# APFS local snapshots. Time Machine keeps these on the boot volume and they
+# can hold tens of gigabytes; `tmutil` is local and fast, so no limit.
+sweep_local_snapshots() {
+  [ "${SWEEP_TESTING:-0}" = 1 ] && return 0
+  sweep_have tmutil || return 0
+  tmutil listlocalsnapshots / 2>/dev/null | sweep_parse_snapshots
+}
+
+# Compare the free space at the start of this run with where the last run left
+# it. Called before any tier, so the figure is not confused with sweep's own.
+sweep_fyi_space_drop() {  # free_before_kb
+  local now="$1" previous drop_kb drop_gb updates snapshots n detail
+
+  previous=$(sweep_state_get last_free_after_kb) || return 0
+  case "$previous" in ''|*[!0-9]*) return 0 ;; esac
+
+  drop_kb=$(( previous - now ))
+  [ "$drop_kb" -gt 0 ] || return 0
+  drop_gb=$(awk -v k="$drop_kb" 'BEGIN { printf "%.1f", k/1048576 }')
+  awk -v k="$drop_kb" -v g="$SPACE_DROP_GB" \
+    'BEGIN { exit !(k/1048576 >= g) }' || return 0
+
+  detail="Free space is down ${drop_gb} GB since the last sweep left it at \
+$(sweep_human "$previous") (now $(sweep_human "$now")). That is not something \
+sweep did, and the usual cause is outside the home folder, where no tier \
+looks."
+  sweep_record_fyi space_drop "$detail"
+
+  [ "${SWEEP_TESTING:-0}" = 1 ] && return 0
+
+  updates=$(sweep_pending_updates)
+  if [ -n "$updates" ]; then
+    n=$(printf '%s\n' "$updates" | wc -l | tr -d ' ')
+    sweep_record_fyi space_drop "$n pending software update(s), which macOS \
+stages on disk before you install them: $(printf '%s\n' "$updates" | \
+sed 's/^/“/; s/$/”/' | tr '\n' ' ' | sed 's/ $//'). Installing or declining \
+them is yours; sweep never touches them."
+  fi
+
+  snapshots=$(sweep_local_snapshots)
+  if [ -n "$snapshots" ]; then
+    n=$(printf '%s\n' "$snapshots" | wc -l | tr -d ' ')
+    sweep_record_fyi space_drop "$n APFS local snapshot(s) on /: \
+$(printf '%s\n' "$snapshots" | tr '\n' ' ' | sed 's/ $//'). Time Machine \
+thins these itself. Before a backup has run one of them may be the only copy \
+of something, so sweep does not delete them; \`tmutil deletelocalsnapshots\` \
+is yours."
+  fi
+  return 0
+}

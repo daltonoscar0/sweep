@@ -11,8 +11,8 @@ SWEEP_TAB=$(printf '\t')
 
 SWEEP_CONFIG_KEYS="CODE_DIR LOW_SPACE_GB KEEP_HF HF_MAX_IDLE_DAYS \
 DERIVED_DATA_MAX_AGE_DAYS DEVICE_SUPPORT_KEEP LOG_MAX_AGE_DAYS CACHE_MIN_MB \
-CACHE_ACTIVE_HOURS CACHE_SKIP AUTO_PUSH PUSH_OWNERS MAX_PUSH_FILE_MB NOTIFY \
-START_DELAY"
+CACHE_ACTIVE_HOURS CACHE_SKIP SPACE_DROP_GB AUTO_PUSH PUSH_OWNERS \
+MAX_PUSH_FILE_MB NOTIFY START_DELAY"
 
 # Cache directory basenames that may be removed from inside CODE_DIR.
 SWEEP_PROJECT_CACHE_NAMES="__pycache__ .pytest_cache .mypy_cache .ruff_cache \
@@ -59,6 +59,7 @@ sweep_load_config() {
   CACHE_MIN_MB=20
   CACHE_ACTIVE_HOURS=6
   CACHE_SKIP="com.apple.Safari com.apple.akd com.apple.accountsd"
+  SPACE_DROP_GB=5
   AUTO_PUSH=1
   PUSH_OWNERS="daltonoscar0"
   MAX_PUSH_FILE_MB=95
@@ -96,6 +97,7 @@ LOG_MAX_AGE_DAYS=14             # ~/Library/Logs files older than this go
 CACHE_MIN_MB=20                 # app cache folders smaller than this are left alone
 CACHE_ACTIVE_HOURS=6            # skip caches touched this recently (app probably open)
 CACHE_SKIP="com.apple.Safari com.apple.akd com.apple.accountsd"  # never touch
+SPACE_DROP_GB=5                 # report when free space drops this much between runs
 
 AUTO_PUSH=1                     # 0 pauses all pushing; everything is still reported
 PUSH_OWNERS="daltonoscar0"      # only auto-push repos whose GitHub owner is listed

@@ -11,6 +11,7 @@ too_big behind large_untracked"
 # FYI kinds, in the order they are printed, with the label each group gets.
 sweep_fyi_groups() {
   printf '%s\n' \
+    "space_drop${SWEEP_TAB}Free space that went somewhere else" \
     "big_file${SWEEP_TAB}Biggest files outside ~/Library (never deleted)" \
     "downloads${SWEEP_TAB}Downloads" \
     "docker${SWEEP_TAB}Docker" \

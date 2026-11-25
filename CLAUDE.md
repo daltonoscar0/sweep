@@ -62,9 +62,13 @@ Hooks that only exist for tests, all gated on `SWEEP_TESTING=1`:
 `SWEEP_NOW`, `SWEEP_FAKE_FREE_KB` (a simulated disk that grows as sweep
 deletes), `SWEEP_FAKE_NETWORK`, `SWEEP_FAKE_BATT`,
 `SWEEP_TEST_OWNER_OVERRIDE` and `.git/sweep-test-owner`. `SWEEP_TESTING=1` also
-blocks every shell-out to `brew`, `pnpm`, `xcrun`, `docker`, `launchctl` and
-`osascript`, so the suite is safe to run on Oscar's own machine. Keep it that
-way: a test that schedules a LaunchAgent or prunes Homebrew is a broken test.
+blocks every shell-out to `brew`, `pnpm`, `xcrun`, `docker`, `launchctl`,
+`osascript`, `softwareupdate` and `tmutil`, so the suite is safe to run on
+Oscar's own machine. Keep it that way: a test that schedules a LaunchAgent,
+prunes Homebrew or asks Apple what updates are pending is a broken test.
+Where a probe parses an external tool's output, split the parser from the call
+(`sweep_parse_updates`, `sweep_parse_snapshots`) and test it on captured
+output; the two `sort`s in those are `LC_ALL=C` so CI's Linux and macOS agree.
 
 If you add a behaviour, add a case in `test/cases/`. One file per behaviour,
 and assertion descriptions read as sentences in the output.

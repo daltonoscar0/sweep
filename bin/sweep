@@ -90,6 +90,10 @@ cmd_run() {
   local free_before free_after low_batt=0
   free_before=$(sweep_free_kb)
 
+  # Before any tier runs, so a drop is attributed to whatever caused it and
+  # not to sweep's own arithmetic.
+  sweep_fyi_space_drop "$free_before"
+
   if sweep_on_low_battery; then
     low_batt=1
     sweep_note "On battery below 30%, so only the light tier ran. The weekly and low-space tiers will run on the next mains-powered sweep."

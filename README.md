@@ -191,6 +191,25 @@ cleaned, then an FYI section, then the setup notes. When `NOTIFY=1` sweep posts
 at most one macOS notification per run, and only when it freed more than
 500 MB, pushed something, or found something that needs you.
 
+### Free space that went somewhere else
+
+If free space is down more than 5 GB from where the last run left it, the FYI
+section says so before the tiers' own figures, and lists what it can see that
+would explain it: pending software updates from `softwareupdate --list` (under
+a 45-second limit — it reaches Apple and is reliably slow) and APFS local
+snapshots from `tmutil listlocalsnapshots /`.
+
+It exists because on 2026-11-25 the disk lost about 15 GB in two hours while
+sweep had removed 38 MB. macOS had staged an OS update, which lives outside the
+home folder where no tier looks, and from the tiers' numbers alone the only
+available conclusion was that sweep had stopped working.
+
+**Report only.** A staged update is wanted and a local snapshot may be the only
+copy of something until Time Machine next runs, so neither is sweep's to
+delete. The commands are printed as yours.
+
+Change the threshold with `SPACE_DROP_GB`.
+
 ## Config
 
 `~/.config/sweep/config` is sourced as bash, so it is `KEY=value` lines. It is
